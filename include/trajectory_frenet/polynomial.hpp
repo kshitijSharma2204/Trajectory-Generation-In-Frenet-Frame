@@ -3,11 +3,12 @@
 #include <cmath>
 #include <Eigen/Dense>
 
-namespace utils {
+namespace trajectory_frenet {
 
 class Polynomial {
 public:
-  Polynomial(const Eigen::Matrix<double,6,1>& boundaries, double T);
+  Polynomial(const Eigen::Matrix<double,6,1>& boundaries, double T); // Constructor for a 6th degree polynomial (s0, v0, a0, sT, vT, aT)
+  Polynomial(const Eigen::Matrix<double,5,1>& boundaries, double T); // Constructor for a 5th degree polynomial (s0, v0, a0, vT, aT)
 
   ~Polynomial() = default;
 
@@ -30,4 +31,4 @@ private:
   static Eigen::VectorXd derivative(const Eigen::VectorXd& coeffs) noexcept;
 };
 
-} // namespace utils
+} // namespace trajectory_frenet
