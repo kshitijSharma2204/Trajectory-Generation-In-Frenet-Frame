@@ -9,7 +9,7 @@ using namespace trajectory_frenet;
 
 cv::Point2i offset(float x, float y, int image_width=2000, int image_height=2000){
   cv::Point2i output;
-  output.x = int(x * 100) + 300;
+  output.x = image_width - (int(x*100) + 300);
   output.y = image_height - int(y * 100) - image_height/3;
   return output;
 }
@@ -33,14 +33,14 @@ int main(int argc, char** argv) {
                 b = 3.45,     
                 c = 2.05;     
     double distance_traced = 0.0, prevX = 0.0;
-    double prevY = 6.2*(std::sin(std::pow((prevX*a - b),2) + (prevX*a - b) + c) + 1);  
+    double prevY = 4.2*(std::sin(std::pow((prevX*a - b),2) + (prevX*a - b) + c) + 1);  
 
 
-    for (double x = 0; x < 155; x += 0.01) {  
+    for (double x = 0; x < 150; x += 0.01) {  
         
-      double y   = 6.2*(std::sin(std::pow((x*a - b),2) + (x*a - b) + c) + 1);
-      double dy  = 6.2*std::cos(std::pow(x*a - b,2) + (x*a - b) + c)*((2*a*(x*a - b)) + a);
-      double ddy = 6.2*((-std::sin(std::pow(x*a - b,2) + (x*a - b) + c)*(std::pow((2*a*(x*a - b) + a),2)))
+      double y   = 4.2*(std::sin(std::pow((x*a - b),2) + (x*a - b) + c) + 1);
+      double dy  = 4.2*std::cos(std::pow(x*a - b,2) + (x*a - b) + c)*((2*a*(x*a - b)) + a);
+      double ddy = 4.2*((-std::sin(std::pow(x*a - b,2) + (x*a - b) + c)*(std::pow((2*a*(x*a - b) + a),2)))
                 + (std::cos(std::pow(x*a - b,2) + (x*a - b) + c)*(2*a*a)));
       double curvature = std::abs(ddy) / std::pow(1 + dy*dy, 1.5);
       double yaw = dy;
@@ -51,8 +51,19 @@ int main(int argc, char** argv) {
 
     cv::namedWindow("Trajectory Planner", cv::WINDOW_NORMAL);
 
+    cv::VideoWriter writer(
+      "trajectory.mp4",
+      cv::VideoWriter::fourcc('m','p','4','v'),
+      30.0,
+      cv::Size(1050, 400)          // ← match your window size
+    );
+    if (!writer.isOpened()) {
+      std::cerr << "ERROR: cannot open video writer\n";
+      return -1;
+    }
+
     auto y_base = [&](double x){
-        return 6.2 * (std::sin(std::pow((x*a - b),2)
+        return 4.2 * (std::sin(std::pow((x*a - b), 2)
                           + (x*a - b)
                           + c) + 1);
     };
@@ -61,21 +72,22 @@ int main(int argc, char** argv) {
         // 3 on-lane (for reference)
         {  30.0, y_base(30.0) },
         {  75.0, y_base(75.0) },
+        {  95.0, y_base(95.0) },
         { 120.0, y_base(120.0) },
-        { 130.0, y_base(130.0) },
 
         // 6 off-lane (bigger lateral offsets)
-        {  20.0, y_base(20.0) + 2.5 },
+        {  30.0, y_base(30.0) + 2.5 },
+        {  30.0, y_base(30.0) - 2.5 },
         {  50.0, y_base(50.0) - 3.0 },
-        {  90.0, y_base(90.0) + 2.0 },
-        { 140.0, y_base(140.0) - 2.2 },
         {  60.0, y_base(60.0) + 3.5 },
-        { 110.0, y_base(110.0) - 2.8 }
+        {  90.0, y_base(90.0) + 2.0 },
+        { 110.0, y_base(110.0) - 2.8 },
+        { 140.0, y_base(140.0) - 2.2 },
     };
 
     // 4) Initial Frenet state
     SamplingParams sp;
-    double d0 = -sp.lane_width;  // or use your SamplingParams directly
+    double d0 = -sp.lane_width;
     double dv0 = 0.0; 
     double da0 = 0.0;
     double s0 = 0.0; 
@@ -87,13 +99,16 @@ int main(int argc, char** argv) {
     double x = 0.0;
 	  double y = 0.0;
 
-
     // 5) Main planning loop
-    int alpha = 0;
     while (true) {
         std::vector<FrenetPath> allPaths;
         FrenetPath p = planner.plan(lat, lon, center_lane, obstacles, allPaths);
 
+        // validate planner output
+        if (p.d.size() < 2 || p.s.size() < 2 || p.world.size() < 2) {
+          std::cerr << "Planner returned insufficient data\n";
+          break;
+        }
         // advance along the chosen path
         d0  = p.d[1][0];  
         dv0 = p.d[1][1];  
@@ -107,14 +122,16 @@ int main(int argc, char** argv) {
         x = p.world[1][0];
         y = p.world[1][1];
 
-        // stopping condition: within 1m of end of centerLane
-        // auto& last = center_lane.back();
-        if (std::sqrt(std::pow(center_lane[10000][0]-x,2)+std::pow(center_lane[10000][1]-y,2))<=1) {
+        // 2) early-stop based on planner’s s
+        double cur_s    = p.s[1][0];
+        double total_s  = center_lane.back()[4];
+        double early_stop = 5.0;
+        if (cur_s >= total_s - early_stop) {
           break;
         }
 
         // visualize
-        cv::Mat lane(5000, 12500, CV_8UC3, cv::Scalar(255, 255, 255));
+        cv::Mat lane(5000, 10500, CV_8UC3, cv::Scalar(255, 255, 255));
         
         // Lane
         for(int i{1}; i<center_lane.size(); i++){
@@ -163,11 +180,15 @@ int main(int argc, char** argv) {
         for(int i{1}; i<p.world.size(); i++){
           cv::line(lane, offset(p.world[i-1][0], p.world[i-1][1], lane.cols, lane.rows), offset(p.world[i][0], p.world[i][1], lane.cols, lane.rows), cv::Scalar(0, 255, 0), 30);
         }
+        
+        cv::Mat frame;
+        cv::resize(lane, frame, cv::Size(1050, 400));  // ← shrink it down
+        writer.write(frame);
 
         cv::resizeWindow("Trajectory Planner", 1050, 400);
         cv::imshow("Trajectory Planner", lane);
         cv::waitKey(1);
     }
-
+    writer.release();
     return 0;
 }
